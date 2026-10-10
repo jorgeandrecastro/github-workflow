@@ -1,77 +1,94 @@
 use colored::*;
-use git2::{Repository, Status};
+use reqwest::blocking::Client;
+use serde::Deserialize;
+use std::env;
+
+#[derive(Deserialize, Debug)]
+struct Repository {
+    name: String,
+    html_url: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct Branch {
+    name: String,
+}
 
 fn main() {
-    // 1. Ouvrir le dépôt Git dans le répertoire courant
-    let repo = match Repository::discover(".") {
-        Ok(r) => r,
+    // 1. Récupérer le token GitHub depuis les variables d'environnement
+    let token = match env::var("GITHUB_TOKEN") {
+        Ok(t) => t,
         Err(_) => {
-            eprintln!("{}", "Erreur : Aucun dépôt Git trouvé ici.".red().bold());
+            eprintln!(
+                "{}",
+                "Erreur : La variable d'environnement GITHUB_TOKEN n'est pas définie.".red().bold()
+            );
+            eprintln!("Définissez-la avec : export GITHUB_TOKEN='votre_token'");
             std::process::exit(1);
         }
     };
 
-    // 2. Récupérer la branche actuelle
-    let branch_name = match repo.head() {
-        Ok(head) => {
-            if head.is_branch() {
-                head.shorthand().unwrap_or("inconnue").to_string()
-            } else {
-                "HEAD détache (detached HEAD)".to_string()
-            }
-        }
-        Err(_) => "Aucun commit / HEAD vide".to_string(),
-    };
-
-    // 3. Affichage de l'en-tête visuel
     println!("\n{}", "========================================".cyan());
-    println!("  PROJET : {} ", "github-workflow".green().bold());
-    println!("  BRANCHE : {}", branch_name.yellow().bold());
+    println!("  PROJET : {} ", "github-workflow (GitHub API)".green().bold());
     println!("{}", "========================================".cyan());
 
-    // 4. Récupérer le statut des fichiers
-    let statuses = match repo.statuses(None) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Erreur lors de la lecture du statut Git : {}", e);
-            std::process::exit(1);
+    // 2. Initialiser le client HTTP avec les en-têtes requis par l'API GitHub
+    let client = Client::new();
+    let url = "https://api.github.com/user/repos?per_page=10";
+
+    println!("Interrogation de l'API GitHub en cours...\n");
+
+    let response = client
+        .get(url)
+        .header("User-Agent", "github-workflow-rust")
+        .header("Authorization", format!("Bearer {}", token))
+        .send();
+
+    match response {
+        Ok(res) => {
+            if res.status().is_success() {
+                let repos: Vec<Repository> = res.json().unwrap_or_default();
+                
+                if repos.is_empty() {
+                    println!("Aucun dépôt trouvé sur votre compte.");
+                } else {
+                    println!("{}", "Vos dépôts GitHub récents :".underline());
+                    for repo in repos {
+                        println!("  📦 {} ({})", repo.name.green().bold(), repo.html_url.dimmed());
+                        
+                        // Optionnel : Récupérer les branches pour chaque dépôt
+                        fetch_branches(&client, &token, &repo.name);
+                    }
+                }
+            } else {
+                eprintln!("Erreur API GitHub : Status {}", res.status());
+            }
         }
-    };
-
-    if statuses.is_empty() {
-        println!("\n✨ {} Tout est propre, aucun fichier modifié.", "[PROPRE]".green().bold());
-    } else {
-        println!("\n{}", "Fichiers modifiés / en cours :".underline());
-        
-        for entry in statuses.iter() {
-            let path = entry.path().unwrap_or("chemin inconnu");
-            let status = entry.status();
-
-            let (label, color_status) = parse_git_status(status);
-            println!("  [{}] {}", label.color(color_status), path);
+        Err(e) => {
+            eprintln!("Erreur réseau : {}", e);
         }
     }
     println!();
 }
 
-// Fonction utilitaire pour traduire les flags Git en labels lisibles et couleurs
-fn fn_status_label(status: Status) -> (&'static str, &'static str) {
-    if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() {
-        return ("STAGED", "green");
-    }
-    if status.is_wt_modified() {
-        return ("MODIFIÉ", "yellow");
-    }
-    if status.is_wt_new() {
-        return ("UNTRACKED", "blue");
-    }
-    if status.is_wt_deleted() {
-        return ("SUPPRIMÉ", "red");
-    }
-    ("MODIFIÉ", "magenta")
-}
+fn fetch_branches(client: &Client, token: &str, repo_name: &str) {
+    // Récupérer le nom d'utilisateur authentifié pour l'URL des branches
+    // (Simplifié ici, ou en passant par l'endpoint /user)
+    let url = format!("https://api.github.com/repos/drew0670/{}/branches", repo_name);
 
-// Wrapper pour correspondre à l'appel
-fn parse_git_status(status: Status) -> (&'static str, &'static str) {
-    fn_status_label(status)
+    let res = client
+        .get(&url)
+        .header("User-Agent", "github-workflow-rust")
+        .header("Authorization", format!("Bearer {}", token))
+        .send();
+
+    if let Ok(response) = res {
+        if response.status().is_success() {
+            let branches: Vec<Branch> = response.json().unwrap_or_default();
+            for branch in branches {
+                print!("    ㄴ 🌿 branch: {} ", branch.name.yellow());
+            }
+            println!();
+        }
+    }
 }
