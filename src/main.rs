@@ -12,7 +12,12 @@ use ratatui::{
 };
 use reqwest::blocking::Client;
 use serde::Deserialize;
-use std::{env, io, time::Duration};
+use std::{
+    env, io,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 #[derive(Deserialize, Debug, Clone)]
 struct Repository {
@@ -42,13 +47,20 @@ struct CommitDetails {
     message: String,
 }
 
+#[derive(Clone)]
+enum BranchState {
+    NotLoaded,
+    Loading,
+    Loaded(Vec<(Branch, Vec<CommitWrapper>)>),
+}
+
+#[derive(Clone)]
 struct RepoItem {
     repo: Repository,
     is_expanded: bool,
-    branches: Option<Vec<(Branch, Vec<CommitWrapper>)>>,
+    branches_state: BranchState,
 }
 
-// Représente les lignes affichées à l'écran pour mapper facilement la sélection clavier
 enum DisplayItem {
     Repo { repo_idx: usize },
     Branch { repo_idx: usize, branch_idx: usize },
@@ -81,14 +93,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec![]
     };
 
-    let mut repo_items: Vec<RepoItem> = repos
+    let repo_items: Vec<RepoItem> = repos
         .into_iter()
         .map(|repo| RepoItem {
             repo,
             is_expanded: false,
-            branches: None,
+            branches_state: BranchState::NotLoaded,
         })
         .collect();
+
+    // Partager l'état global de manière sécurisée entre les threads
+    let repo_items = Arc::new(Mutex::new(repo_items));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -97,12 +112,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut list_state = ListState::default();
-    if !repo_items.is_empty() {
+    if !repo_items.lock().unwrap().is_empty() {
         list_state.select(Some(0));
     }
 
     loop {
         let mut display_map: Vec<DisplayItem> = Vec::new();
+        let items_guard = repo_items.lock().unwrap();
 
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -123,9 +139,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .block(Block::default().borders(Borders::ALL).title("Projet"));
             f.render_widget(header, chunks[0]);
 
-            let mut items: Vec<ListItem> = Vec::new();
+            let mut list_items: Vec<ListItem> = Vec::new();
 
-            for (repo_idx, item) in repo_items.iter().enumerate() {
+            for (repo_idx, item) in items_guard.iter().enumerate() {
                 display_map.push(DisplayItem::Repo { repo_idx });
                 
                 let prefix = if item.is_expanded { "📂 [▼]" } else { "📁 [▶]" };
@@ -138,50 +154,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Style::default().fg(Color::Green)
                 };
 
-                items.push(ListItem::new(title).style(style));
+                list_items.push(ListItem::new(title).style(style));
 
                 if item.is_expanded {
-                    if let Some(ref branches) = item.branches {
-                        if branches.is_empty() {
-                            display_map.push(DisplayItem::Empty);
-                            items.push(ListItem::new("     (Aucune branche trouvée)").style(Style::default().fg(Color::DarkGray)));
-                        } else {
-                            for (branch_idx, (branch, commits)) in branches.iter().enumerate() {
-                                display_map.push(DisplayItem::Branch { repo_idx, branch_idx });
-                                
-                                let is_b_selected = list_state.selected() == Some(display_map.len() - 1);
-                                let b_style = if is_b_selected {
-                                    Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-                                } else {
-                                    Style::default().fg(Color::LightYellow)
-                                };
-
-                                items.push(ListItem::new(format!("     ├── 🌿 Branche : {}", branch.name)).style(b_style));
-
-                                for (commit_idx, commit) in commits.iter().enumerate() {
-                                    display_map.push(DisplayItem::Commit { repo_idx, branch_idx, commit_idx });
-                                    let short_sha = if commit.sha.len() >= 7 { &commit.sha[..7] } else { &commit.sha };
-                                    let msg = commit.commit.message.lines().next().unwrap_or("");
+                    match &item.branches_state {
+                        BranchState::NotLoaded | BranchState::Loading => {
+                            display_map.push(DisplayItem::Loading);
+                            list_items.push(
+                                ListItem::new("     ⏳ Chargement des branches en cours...")
+                                    .style(Style::default().fg(Color::DarkGray)),
+                            );
+                        }
+                        BranchState::Loaded(branches) => {
+                            if branches.is_empty() {
+                                display_map.push(DisplayItem::Empty);
+                                list_items.push(
+                                    ListItem::new("     (Aucune branche trouvée)")
+                                        .style(Style::default().fg(Color::DarkGray)),
+                                );
+                            } else {
+                                for (branch_idx, (branch, commits)) in branches.iter().enumerate() {
+                                    display_map.push(DisplayItem::Branch { repo_idx, branch_idx });
                                     
-                                    let is_c_selected = list_state.selected() == Some(display_map.len() - 1);
-                                    let c_style = if is_c_selected {
-                                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                                    let is_b_selected = list_state.selected() == Some(display_map.len() - 1);
+                                    let b_style = if is_b_selected {
+                                        Style::default()
+                                            .fg(Color::LightYellow)
+                                            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
                                     } else {
-                                        Style::default().fg(Color::DarkGray)
+                                        Style::default().fg(Color::LightYellow)
                                     };
 
-                                    items.push(ListItem::new(format!("     │    └── 💻 [{}] {}", short_sha, msg)).style(c_style));
+                                    list_items.push(
+                                        ListItem::new(format!("     ├── 🌿 Branche : {}", branch.name))
+                                            .style(b_style),
+                                    );
+
+                                    for (commit_idx, commit) in commits.iter().enumerate() {
+                                        display_map.push(DisplayItem::Commit {
+                                            repo_idx,
+                                            branch_idx,
+                                            commit_idx,
+                                        });
+                                        let short_sha = if commit.sha.len() >= 7 {
+                                            &commit.sha[..7]
+                                        } else {
+                                            &commit.sha
+                                        };
+                                        let msg = commit.commit.message.lines().next().unwrap_or("");
+                                        
+                                        let is_c_selected = list_state.selected() == Some(display_map.len() - 1);
+                                        let c_style = if is_c_selected {
+                                            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                                        } else {
+                                            Style::default().fg(Color::DarkGray)
+                                        };
+
+                                        list_items.push(
+                                            ListItem::new(format!(
+                                                "     │    └── 💻 [{}] {}",
+                                                short_sha, msg
+                                            ))
+                                            .style(c_style),
+                                        );
+                                    }
                                 }
                             }
                         }
-                    } else {
-                        display_map.push(DisplayItem::Loading);
-                        items.push(ListItem::new("     Chargement des branches...").style(Style::default().fg(Color::Gray)));
                     }
                 }
             }
 
-            let list = List::new(items)
+            let list = List::new(list_items)
                 .block(Block::default().borders(Borders::ALL).title("Dépôts GitHub récents"))
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
@@ -193,8 +237,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             f.render_widget(help, chunks[2]);
         })?;
 
-        if event::poll(Duration::from_millis(100))? {
+        drop(items_guard); // Libérer le verrou avant de traiter les événements
+
+        if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                let mut items_guard = repo_items.lock().unwrap();
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Down => {
@@ -214,17 +261,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Enter | KeyCode::Char(' ') => {
                         if let Some(selected) = list_state.selected() {
                             if let Some(DisplayItem::Repo { repo_idx }) = display_map.get(selected) {
-                                let item = &mut repo_items[*repo_idx];
+                                let item = &mut items_guard[*repo_idx];
                                 item.is_expanded = !item.is_expanded;
 
-                                if item.is_expanded && item.branches.is_none() {
-                                    let branches = fetch_branches_and_commits(
-                                        &client,
-                                        &token,
-                                        &item.repo.owner.login,
-                                        &item.repo.name,
-                                    );
-                                    item.branches = Some(branches);
+                                // Si on l'ouvre et qu'on n'a encore rien chargé
+                                if item.is_expanded {
+                                    if let BranchState::NotLoaded = item.branches_state {
+                                        item.branches_state = BranchState::Loading;
+                                        
+                                        let client_clone = client.clone();
+                                        let token_clone = token.clone();
+                                        let owner = item.repo.owner.login.clone();
+                                        let repo_name = item.repo.name.clone();
+                                        let repo_items_clone = Arc::clone(&repo_items);
+                                        let target_idx = *repo_idx;
+
+                                        // Lancement en arrière-plan (Zero freeze !)
+                                        thread::spawn(move || {
+                                            let branches = fetch_branches_and_commits(
+                                                &client_clone,
+                                                &token_clone,
+                                                &owner,
+                                                &repo_name,
+                                            );
+                                            let mut guard = repo_items_clone.lock().unwrap();
+                                            guard[target_idx].branches_state = BranchState::Loaded(branches);
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -234,12 +297,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(display_item) = display_map.get(selected) {
                                 match display_item {
                                     DisplayItem::Repo { repo_idx } => {
-                                        let url = &repo_items[*repo_idx].repo.html_url;
+                                        let url = &items_guard[*repo_idx].repo.html_url;
                                         let _ = open::that(url);
                                     }
                                     DisplayItem::Branch { repo_idx, branch_idx } => {
-                                        let repo = &repo_items[*repo_idx].repo;
-                                        if let Some(ref branches) = repo_items[*repo_idx].branches {
+                                        let repo = &items_guard[*repo_idx].repo;
+                                        if let BranchState::Loaded(ref branches) = items_guard[*repo_idx].branches_state {
                                             if let Some((branch, _)) = branches.get(*branch_idx) {
                                                 let url = format!("{}/tree/{}", repo.html_url, branch.name);
                                                 let _ = open::that(url);
@@ -247,8 +310,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
                                     DisplayItem::Commit { repo_idx, branch_idx, commit_idx } => {
-                                        let repo = &repo_items[*repo_idx].repo;
-                                        if let Some(ref branches) = repo_items[*repo_idx].branches {
+                                        let repo = &items_guard[*repo_idx].repo;
+                                        if let BranchState::Loaded(ref branches) = items_guard[*repo_idx].branches_state {
                                             if let Some((_, commits)) = branches.get(*branch_idx) {
                                                 if let Some(commit) = commits.get(*commit_idx) {
                                                     let url = format!("{}/commit/{}", repo.html_url, commit.sha);
