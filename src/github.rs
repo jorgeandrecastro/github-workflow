@@ -1,6 +1,7 @@
 use crate::models::{Branch, BranchInfo, CommitWrapper, PullRequest, Repository};
 use reqwest::blocking::Client;
 use serde::Deserialize;
+use std::thread;
 
 #[derive(Deserialize)]
 struct CheckSuiteResponse {
@@ -42,77 +43,85 @@ pub fn fetch_branch_details(
         .header("Authorization", format!("Bearer {}", token))
         .send();
 
-    let mut result = Vec::new();
-
     let branches: Vec<Branch> = match res {
         Ok(resp) if resp.status().is_success() => resp.json().unwrap_or_default(),
-        _ => return result,
+        _ => return vec![],
     };
 
-    for branch in branches {
-        // 1. Commits récents
-        let commits_url = format!(
-            "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=2",
-            owner, repo_name, branch.name
-        );
-        let commits_res = client
-            .get(&commits_url)
-            .header("User-Agent", "github-workflow-rust")
-            .header("Authorization", format!("Bearer {}", token))
-            .send();
+    // Utilisation d'un scope de threads pour exécuter les requêtes en parallèle
+    let results: Vec<BranchInfo> = thread::scope(|s| {
+        let handles: Vec<_> = branches
+            .into_iter()
+            .map(|branch| {
+                let client_ref = client;
+                let token_ref = token;
+                let owner_ref = owner;
+                let repo_ref = repo_name;
 
-        let commits: Vec<CommitWrapper> = match commits_res {
-            Ok(resp) if resp.status().is_success() => resp.json().unwrap_or_default(),
-            _ => vec![],
-        };
+                s.spawn(move || {
+                    let branch_name = &branch.name;
 
-        // 2. Pull Requests associées à la branche
-        let prs_url = format!(
-            "https://api.github.com/repos/{}/{}/pulls?head={}:{}&state=open",
-            owner, repo_name, owner, branch.name
-        );
-        let prs_res = client
-            .get(&prs_url)
-            .header("User-Agent", "github-workflow-rust")
-            .header("Authorization", format!("Bearer {}", token))
-            .send();
+                    // 1. Commits récents
+                    let commits_url = format!(
+                        "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=2",
+                        owner_ref, repo_ref, branch_name
+                    );
+                    let commits: Vec<CommitWrapper> = client_ref
+                        .get(&commits_url)
+                        .header("User-Agent", "github-workflow-rust")
+                        .header("Authorization", format!("Bearer {}", token_ref))
+                        .send()
+                        .and_then(|r| r.json())
+                        .unwrap_or_default();
 
-        let prs: Vec<PullRequest> = match prs_res {
-            Ok(resp) if resp.status().is_success() => resp.json().unwrap_or_default(),
-            _ => vec![],
-        };
+                    // 2. Pull Requests associées
+                    let prs_url = format!(
+                        "https://api.github.com/repos/{}/{}/pulls?head={}:{}&state=open",
+                        owner_ref, repo_ref, owner_ref, branch_name
+                    );
+                    let prs: Vec<PullRequest> = client_ref
+                        .get(&prs_url)
+                        .header("User-Agent", "github-workflow-rust")
+                        .header("Authorization", format!("Bearer {}", token_ref))
+                        .send()
+                        .and_then(|r| r.json())
+                        .unwrap_or_default();
 
-        // 3. Statut CI/CD (GitHub Actions Check Suites)
-        let ci_url = format!(
-            "https://api.github.com/repos/{}/{}/check-suites?ref={}",
-            owner, repo_name, branch.name
-        );
-        let ci_res = client
-            .get(&ci_url)
-            .header("User-Agent", "github-workflow-rust")
-            .header("Authorization", format!("Bearer {}", token))
-            .send();
-
-        let mut ci_status = "unknown".to_string();
-        if let Ok(resp) = ci_res {
-            if resp.status().is_success() {
-                if let Ok(ci_data) = resp.json::<CheckSuiteResponse>() {
-                    if let Some(suite) = ci_data.check_suites.first() {
-                        if let Some(conclusion) = &suite.conclusion {
-                            ci_status = conclusion.clone(); // ex: "success", "failure"
+                    // 3. Statut CI/CD
+                    let ci_url = format!(
+                        "https://api.github.com/repos/{}/{}/check-suites?ref={}",
+                        owner_ref, repo_ref, branch_name
+                    );
+                    let mut ci_status = "unknown".to_string();
+                    if let Ok(resp) = client_ref
+                        .get(&ci_url)
+                        .header("User-Agent", "github-workflow-rust")
+                        .header("Authorization", format!("Bearer {}", token_ref))
+                        .send()
+                    {
+                        if resp.status().is_success() {
+                            if let Ok(ci_data) = resp.json::<CheckSuiteResponse>() {
+                                if let Some(suite) = ci_data.check_suites.first() {
+                                    if let Some(conclusion) = &suite.conclusion {
+                                        ci_status = conclusion.clone();
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-            }
-        }
 
-        result.push(BranchInfo {
-            branch,
-            commits,
-            prs,
-            ci_status,
-        });
-    }
+                    BranchInfo {
+                        branch,
+                        commits,
+                        prs,
+                        ci_status,
+                    }
+                })
+            })
+            .collect();
 
-    result
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    results
 }
