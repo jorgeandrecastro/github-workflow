@@ -2,16 +2,16 @@
 
 # github-workflow 🚀
 
-**Browse your GitHub repositories, branches, pull requests, and CI/CD statuses — right from your terminal.**
+**Browse your GitHub repositories, branches, pull requests, and CI/CD statuses right from your terminal.**
 
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Ratatui](https://img.shields.io/badge/TUI-Ratatui-blue?style=for-the-badge)](https://ratatui.rs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
 <br>
-<img src="assets/image1.png" alt="github-workflow demo" width="800"/>
+<img src="images/image1.png" alt="github-workflow demo" width="800"/>
 <br>
-<img src="assets/image2.png" alt="github-workflow demo" width="800"/>
+<img src="images/image2.png" alt="github-workflow demo" width="800"/>
 
 
 </div>
