@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin_name: github-workflow-linux
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bin_name: github-workflow-macos
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_name: github-workflow-windows.exe
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        uses: actions-rs/cargo-build@v1
+        with:
+          use-cross: true
+          command: build
+          args: --release --target ${{ matrix.target }}
