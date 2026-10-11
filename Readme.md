@@ -20,7 +20,7 @@
 
 ## Why github-workflow?
 
-Switching between your terminal, browser, and GitHub just to check a pull request or CI run can interrupt your flow. **github-workflow** is a fast, asynchronous terminal UI that brings your GitHub activity into one place—without leaving the command line.
+Switching between your terminal, browser, and GitHub just to check a pull request or CI run can interrupt your flow. **github-workflow** is a fast, asynchronous terminal UI that brings your GitHub activity into one place without leaving the command line.
 
 ## Features
 
@@ -59,6 +59,29 @@ Switching between your terminal, browser, and GitHub just to check a pull reques
 
    ```bash
    cargo run --release
+   ```
+## Download & Run (No Rust required)
+
+If you don't have Rust installed and just want to test the binary directly:
+
+1. Go to the [Releases page](https://github.com/jorgeandrecastro/github-workflow/releases) and download the binary for your operating system (`linux`, `macos`, or `windows`).
+
+2. Make the binary executable (Linux/macOS):
+
+   ```bash
+   chmod +x github-workflow-linux
+   ```
+
+3. Set your GitHub token:
+
+   ```bash
+   export GITHUB_TOKEN="your_personal_access_token_here"
+   ```
+
+4. Run the app:
+
+   ```bash
+   ./github-workflow-linux
    ```
 
 ## Keyboard shortcuts
