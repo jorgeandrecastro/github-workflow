@@ -1,5 +1,6 @@
 mod github;
 mod models;
+mod styles;
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -12,7 +13,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
 };
 use reqwest::blocking::Client;
 use std::{
@@ -23,12 +24,13 @@ use std::{
 };
 
 use models::{BranchState, DisplayItem, RepoItem};
+use styles::Theme;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token = match env::var("GITHUB_TOKEN") {
         Ok(t) => t,
         Err(_) => {
-            eprintln!("Erreur : La variable GITHUB_TOKEN n'est pas définie.");
+            eprintln!("Error: The GITHUB_TOKEN environment variable is not defined.");
             std::process::exit(1);
         }
     };
@@ -58,15 +60,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         list_state.select(Some(0));
     }
 
-    // Gestion de la recherche textuelle
+    // Text search management
     let mut search_mode = false;
     let mut search_query = String::new();
 
     loop {
-        let mut display_map: Vec<(DisplayItem, usize)> = Vec::new(); // (Item, original_repo_idx)
+        let mut display_map: Vec<(DisplayItem, usize)> = Vec::new();
         let items_guard = repo_items.lock().unwrap();
 
-        // Filtrage dynamique des dépôts selon la recherche
+        // Dynamic repository filtering based on search query
         let filtered_indices: Vec<usize> = items_guard
             .iter()
             .enumerate()
@@ -89,42 +91,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .margin(1)
                 .constraints(
                     [
-                        Constraint::Length(3), // En-tête
-                        Constraint::Length(3), // Barre de recherche
-                        Constraint::Min(10),   // Liste
-                        Constraint::Length(3), // Aide
+                        Constraint::Length(3), // Header
+                        Constraint::Length(3), // Search bar
+                        Constraint::Min(10),   // Main list
+                        Constraint::Length(3), // Help / shortcuts bar
                     ]
                     .as_ref(),
                 )
                 .split(f.area());
 
-            let header = Paragraph::new(" 🚀 GITHUB-WORKFLOW - Dashboard Pro ")
-                .style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(Block::default().borders(Borders::ALL).title("Projet"));
+            // Header v0.2
+            let header = Paragraph::new(" 🚀 Github-workflow v0.2 — Dashboard ")
+                .style(Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD))
+                .block(Theme::block("Dashboard"));
             f.render_widget(header, chunks[0]);
 
-            // Barre de recherche
+            // Search bar
             let search_text = if search_mode {
-                format!("🔍 Recherche : {}_", search_query)
+                format!("🔍 Search: {}_", search_query)
             } else if search_query.is_empty() {
-                "🔍 Appuyez sur '/' pour filtrer les dépôts...".to_string()
+                "🔍 Press '/' to filter repositories...".to_string()
             } else {
                 format!(
-                    "🔍 Filtre actif : {} (Appuyez sur Échap pour effacer)",
+                    "🔍 Active filter: {} (Press Esc to clear)",
                     search_query
                 )
             };
             let search_bar = Paragraph::new(search_text)
                 .style(Style::default().fg(if search_mode {
-                    Color::Yellow
+                    Theme::WARNING
                 } else {
-                    Color::DarkGray
+                    Theme::SUBTLE
                 }))
-                .block(Block::default().borders(Borders::ALL));
+                .block(Theme::block("Search"));
             f.render_widget(search_bar, chunks[1]);
 
             let mut list_items: Vec<ListItem> = Vec::new();
@@ -133,20 +132,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let item = &items_guard[repo_idx];
                 display_map.push((DisplayItem::Repo { repo_idx }, repo_idx));
 
-                let prefix = if item.is_expanded {
-                    "📂 [▼]"
-                } else {
-                    "📁 [▶]"
-                };
+                let prefix = if item.is_expanded { "📂 [▼]" } else { "📁 [▶]" };
                 let title = format!("{} {} ({})", prefix, item.repo.name, item.repo.html_url);
 
                 let is_current_selected = list_state.selected() == Some(display_map.len() - 1);
                 let style = if is_current_selected {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Theme::selected_item()
                 } else {
-                    Style::default().fg(Color::Green)
+                    Style::default().fg(Theme::PRIMARY)
                 };
 
                 list_items.push(ListItem::new(title).style(style));
@@ -156,16 +149,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         BranchState::NotLoaded | BranchState::Loading => {
                             display_map.push((DisplayItem::Loading, repo_idx));
                             list_items.push(
-                                ListItem::new("     ⏳ Chargement des branches, PRs & CI...")
-                                    .style(Style::default().fg(Color::DarkGray)),
+                                ListItem::new("     ⏳ Loading branches, PRs & CI...")
+                                    .style(Style::default().fg(Theme::SUBTLE)),
                             );
                         }
                         BranchState::Loaded(branches) => {
                             if branches.is_empty() {
                                 display_map.push((DisplayItem::Empty, repo_idx));
                                 list_items.push(
-                                    ListItem::new("     (Aucune branche trouvée)")
-                                        .style(Style::default().fg(Color::DarkGray)),
+                                    ListItem::new("     (No branches found)")
+                                        .style(Style::default().fg(Theme::SUBTLE)),
                                 );
                             } else {
                                 for (branch_idx, b_info) in branches.iter().enumerate() {
@@ -177,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         repo_idx,
                                     ));
 
-                                    // Indicateur CI/CD
+                                    // CI/CD Status indicator
                                     let ci_icon = match b_info.ci_status.as_str() {
                                         "success" => "🟢".green(),
                                         "failure" => "🔴".red(),
@@ -186,11 +179,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let is_b_selected =
                                         list_state.selected() == Some(display_map.len() - 1);
                                     let b_style = if is_b_selected {
-                                        Style::default()
-                                            .fg(Color::LightYellow)
-                                            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                                        Theme::selected_item().add_modifier(Modifier::UNDERLINED)
                                     } else {
-                                        Style::default().fg(Color::LightYellow)
+                                        Style::default().fg(Theme::ACCENT)
                                     };
 
                                     list_items.push(
@@ -201,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         .style(b_style),
                                     );
 
-                                    // Afficher les Pull Requests ouvertes s'il y en a
+                                    // Pull Requests
                                     for (pr_idx, pr) in b_info.prs.iter().enumerate() {
                                         display_map.push((
                                             DisplayItem::PullRequest {
@@ -214,11 +205,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let is_pr_selected =
                                             list_state.selected() == Some(display_map.len() - 1);
                                         let pr_style = if is_pr_selected {
-                                            Style::default()
-                                                .fg(Color::Magenta)
-                                                .add_modifier(Modifier::BOLD)
+                                            Theme::selected_item()
                                         } else {
-                                            Style::default().fg(Color::DarkGray)
+                                            Style::default().fg(Color::Rgb(175, 150, 220))
                                         };
                                         list_items.push(
                                             ListItem::new(format!("     │    🔀 PR: {}", pr.title))
@@ -226,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         );
                                     }
 
-                                    // Commits récents
+                                    // Recent commits
                                     for (commit_idx, commit) in b_info.commits.iter().enumerate() {
                                         display_map.push((
                                             DisplayItem::Commit {
@@ -247,11 +236,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let is_c_selected =
                                             list_state.selected() == Some(display_map.len() - 1);
                                         let c_style = if is_c_selected {
-                                            Style::default()
-                                                .fg(Color::White)
-                                                .add_modifier(Modifier::BOLD)
+                                            Theme::selected_item()
                                         } else {
-                                            Style::default().fg(Color::DarkGray)
+                                            Style::default().fg(Theme::SUBTLE)
                                         };
 
                                         list_items.push(
@@ -270,16 +257,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let list = List::new(list_items)
-                .block(Block::default().borders(Borders::ALL).title("Dépôts"))
+                .block(Theme::block("Repositories"))
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
             f.render_stateful_widget(list, chunks[2], &mut list_state);
 
+            // Help / Shortcuts
             let help = Paragraph::new(
-                " /: Chercher | ↑/↓: Naviguer | Espace: Dérouler | o: Ouvrir Web | q: Quitter ",
+                " /: Search | ↑/↓: Navigate | Space: Expand | o: Open Web | q: Quit ",
             )
-            .style(Style::default().fg(Color::Gray))
-            .block(Block::default().borders(Borders::ALL).title(" Raccourcis "));
+            .style(Style::default().fg(Theme::SUBTLE))
+            .block(Theme::block("Shortcuts"));
             f.render_widget(help, chunks[3]);
         })?;
 
