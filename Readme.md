@@ -13,7 +13,6 @@
 <br>
 <img src="images/image2.png" alt="github-workflow demo" width="800"/>
 
-
 </div>
 
 ---
@@ -28,8 +27,9 @@ Switching between your terminal, browser, and GitHub just to check a pull reques
 | --- | --- |
 | ⚡ **Responsive interface** | Rust-powered background workers keep the UI responsive during API calls. |
 | 📂 **On-demand loading** | Repositories load first; branches, commits, and pull requests are fetched as you explore. |
-| 🔎 **Live filtering** | Press `/` to filter repositories by name. |
-| ✅ **CI/CD status** | Check status indicators appear alongside branches. |
+| 🔄 **On-the-fly refresh** | Press `r` to asynchronously reload data for any selected repository. |
+| 🔎 **Live filtering** | Press `/` to filter repositories by name in real time. |
+| ✅ **CI/CD status** | Real-time status indicators (success, failure, in-progress) alongside branches. |
 | 🔀 **Pull request overview** | See open pull requests associated with your branches. |
 | 🌐 **Open in browser** | Press `o` on a repository, branch, pull request, or commit to open it on GitHub. |
 
@@ -38,7 +38,7 @@ Switching between your terminal, browser, and GitHub just to check a pull reques
 ### Prerequisites
 
 - [Rust toolchain](https://www.rust-lang.org/tools/install)
-- A GitHub Personal Access Token (PAT) with the required repository read access
+- A GitHub Personal Access Token (PAT) with required repository read access
 
 ### Install and run
 
@@ -60,6 +60,7 @@ Switching between your terminal, browser, and GitHub just to check a pull reques
    ```bash
    cargo run --release
    ```
+
 ## Download & Run (No Rust required)
 
 If you don't have Rust installed and just want to test the binary directly:
@@ -88,9 +89,10 @@ If you don't have Rust installed and just want to test the binary directly:
 
 | Key | Action |
 | --- | --- |
-| `↑` / `↓` | Navigate repositories, branches, and commits |
+| `↑` / `↓` | Navigate repositories, branches, pull requests, and commits |
 | `Space` / `Enter` | Expand or collapse the repository tree |
 | `/` | Filter repositories by name |
+| `r` | Refresh the selected repository asynchronously |
 | `o` | Open the selected item in your browser |
 | `q` / `Esc` | Quit the application |
 

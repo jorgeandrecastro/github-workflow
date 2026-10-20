@@ -262,9 +262,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             f.render_stateful_widget(list, chunks[2], &mut list_state);
 
-            // Help / Shortcuts
+            // Help / Shortcuts (Updated to include 'r: Refresh')
             let help = Paragraph::new(
-                " /: Search | ↑/↓: Navigate | Space: Expand | o: Open Web | q: Quit ",
+                " /: Search | r: Refresh | ↑/↓: Navigate | Space: Expand | o: Open Web | q: Quit ",
             )
             .style(Style::default().fg(Theme::SUBTLE))
             .block(Theme::block("Shortcuts"));
@@ -302,6 +302,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         KeyCode::Char('/') => {
                             search_mode = true;
+                        }
+                        // Added asynchronous refresh handler for 'r' key
+                        KeyCode::Char('r') => {
+                            if let Some(selected) = list_state.selected() {
+                                if let Some((display_item, _)) = display_map.get(selected) {
+                                    let repo_idx = match display_item {
+                                        DisplayItem::Repo { repo_idx }
+                                        | DisplayItem::Branch { repo_idx, .. }
+                                        | DisplayItem::Commit { repo_idx, .. }
+                                        | DisplayItem::PullRequest { repo_idx, .. } => *repo_idx,
+                                        _ => usize::MAX,
+                                    };
+
+                                    if repo_idx < items_guard.len() {
+                                        let item = &mut items_guard[repo_idx];
+                                        item.branches_state = BranchState::Loading;
+
+                                        let client_clone = client.clone();
+                                        let token_clone = token.clone();
+                                        let owner = item.repo.owner.login.clone();
+                                        let repo_name = item.repo.name.clone();
+                                        let repo_items_clone = Arc::clone(&repo_items);
+                                        let target_idx = repo_idx;
+
+                                        thread::spawn(move || {
+                                            let branch_infos = github::fetch_branch_details(
+                                                &client_clone,
+                                                &token_clone,
+                                                &owner,
+                                                &repo_name,
+                                            );
+                                            let mut guard = repo_items_clone.lock().unwrap();
+                                            guard[target_idx].branches_state =
+                                                BranchState::Loaded(branch_infos);
+                                        });
+                                    }
+                                }
+                            }
                         }
                         KeyCode::Down => {
                             if let Some(selected) = list_state.selected() {

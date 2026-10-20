@@ -1,61 +1,72 @@
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug, Clone)]
+/// Represents a GitHub repository.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Repository {
     pub name: String,
     pub owner: Owner,
     pub html_url: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+/// Represents the owner of a repository.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Owner {
     pub login: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+/// Represents a Git branch.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Branch {
     pub name: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+/// Wrapper for commit data from GitHub API.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct CommitWrapper {
     pub sha: String,
     pub commit: CommitDetails,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+/// Details of a specific commit.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct CommitDetails {
     pub message: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+/// Represents an open Pull Request.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct PullRequest {
     pub title: String,
     pub html_url: String,
 }
 
-#[derive(Clone)]
+/// State of branch loading for a repository (Lazy Loading).
+#[derive(Clone, Debug, PartialEq)]
 pub enum BranchState {
     NotLoaded,
     Loading,
     Loaded(Vec<BranchInfo>),
 }
 
-#[derive(Clone)]
+/// Detailed information about a branch including commits, PRs, and CI status.
+#[derive(Clone, Debug, PartialEq)]
 pub struct BranchInfo {
     pub branch: Branch,
     pub commits: Vec<CommitWrapper>,
     pub prs: Vec<PullRequest>,
-    pub ci_status: String, // "success", "failure", ou "unknown"
+    pub ci_status: String, // "success", "failure", "in_progress", or "unknown"
 }
 
-#[derive(Clone)]
+/// Represents a repository item in the TUI state.
+#[derive(Clone, Debug, PartialEq)]
 pub struct RepoItem {
     pub repo: Repository,
     pub is_expanded: bool,
     pub branches_state: BranchState,
 }
 
+/// Maps the flattened TUI list items back to their original hierarchical data source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayItem {
     Repo {
         repo_idx: usize,
