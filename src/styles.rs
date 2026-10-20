@@ -8,8 +8,6 @@ impl Theme {
     pub const PRIMARY: Color = Color::Rgb(240, 240, 245);    // Soft white / light gray
     pub const ACCENT: Color = Color::Rgb(180, 185, 195);     // Platinum / silver
     pub const SUBTLE: Color = Color::Rgb(90, 95, 105);       // Clean medium gray
-    
-    #[allow(dead_code)]
     pub const SUCCESS: Color = Color::Rgb(52, 199, 89);      // Muted green
     
     #[allow(dead_code)]
@@ -28,10 +26,10 @@ impl Theme {
             .title_style(Style::default().fg(Self::PRIMARY).add_modifier(Modifier::BOLD))
     }
 
-    /// Elegant style for the selected item
+    /// Elegant green style for the selected item during navigation
     pub fn selected_item() -> Style {
         Style::default()
-            .fg(Self::PRIMARY)
+            .fg(Self::SUCCESS)
             .bg(Self::SELECTION_BG)
             .add_modifier(Modifier::BOLD)
     }
