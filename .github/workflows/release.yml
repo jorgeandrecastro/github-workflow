@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write   # <--- C'est cette ligne qui manquait pour autoriser l'écriture !
     strategy:
       matrix:
         include:
